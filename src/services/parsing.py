@@ -1,13 +1,18 @@
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import aiohttp
+from aiogram import Bot
+from aiogram.types import Message
 from bs4 import BeautifulSoup
 import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from src.database.models import Fragrance, engine
+from config import config
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+config.setup_logging()
 logger = logging.getLogger(__name__)
 
 MONTAGNE_URL = "https://www.montagneparfums.com/fragrance"
@@ -22,7 +27,7 @@ HEADERS = {
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-async def update_fragrances():
+async def update_fragrances(message: Message, bot: Bot):
     """Check the availability of products and update the database."""
     async with aiohttp.ClientSession() as session:
         try:
@@ -51,12 +56,27 @@ async def update_fragrances():
                         # Update the existing fragrance
                         if fragrance.is_sold_out != bool(sold_out_marker):
                             fragrance.is_sold_out = bool(sold_out_marker)
-                            logger.info(f"Updated fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}")
+                            fragrance.parsed_datetime = datetime.now(ZoneInfo('Asia/Almaty'))
+                            logger.info(f"Updated fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
+                                        f"parsed_datetime={fragrance.parsed_datetime}")
+
+                            if not bool(sold_out_marker):
+                                # Notify users if the fragrance is no longer sold out
+                                from src.handlers.handlers import send_notification
+                                await send_notification(bot, fragrance)
+                                logger.info("Notifications have been sent")
                     else:
                         # Create a new fragrance
-                        fragrance = Fragrance(name=product_name_upper, is_sold_out=bool(sold_out_marker))
+                        fragrance = Fragrance(name=product_name_upper, is_sold_out=bool(sold_out_marker),
+                                              parsed_datetime=datetime.now(ZoneInfo('Asia/Almaty')))
                         db_session.add(fragrance)
-                        logger.info(f"Added new fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}")
+                        logger.info(f"Added new fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
+                                    f"parsed_datetime={fragrance.parsed_datetime}")
+
+                        # Notify users if the new fragrance has been added
+                        from src.handlers.handlers import send_notification_new_fragrance
+                        await send_notification_new_fragrance(bot, fragrance)
+                        logger.info("Notifications have been sent")
 
             await db_session.commit()
             logger.info("Database update completed.")

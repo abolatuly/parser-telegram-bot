@@ -1,7 +1,7 @@
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton
 
-main = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📄 Wishlist"),
-                                      KeyboardButton(text="🔍 Fragrances")]],
+main = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📄 Wishlist"), KeyboardButton(text="🔍 Fragrances")],
+                                     [KeyboardButton(text="⚙️ Settings")]],
                            input_field_placeholder="Choose from the menu", resize_keyboard=True)
 
 add_to_wishlist = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add fragrance to wishlist")],

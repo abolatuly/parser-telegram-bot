@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
@@ -20,3 +21,11 @@ def load_config() -> Config:
     load_dotenv()
 
     return Config(tg_bot=TelegramBotConfig(token=getenv("BOT_TOKEN")))
+
+
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
