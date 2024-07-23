@@ -26,7 +26,8 @@ async def process_any_message(message: Message):
 
 
 @router.message(F.text == "◀️ Back to menu")
-async def menu(msg: Message):
+async def menu(msg: Message, state: FSMContext):
+    await state.clear()
     await msg.answer(text="Main menu", reply_markup=kb.main)
 
 
@@ -179,7 +180,11 @@ async def send_notification(bot: Bot, fragrance):
 
         for user_id in users:
             try:
-                await bot.send_message(chat_id=user_id, text=f"The fragrance {fragrance.name} is now available!")
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=fragrance.image_url,  # Use the image URL from the fragrance object
+                    caption=f"The fragrance {fragrance.name} is now available!"
+                )
             except Exception as e:
                 logger.error(f"Error sending notification to user {user_id}: {e}")
     except Exception as e:
@@ -192,8 +197,11 @@ async def send_notification_new_fragrance(bot: Bot, fragrance):
 
         for user_id in users:
             try:
-                await bot.send_message(chat_id=user_id, text=f"New fragrance is at the store! "
-                                                                     f"Check out {fragrance.name}!")
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=fragrance.image_url,  # Use the image URL from the fragrance object
+                    caption=f"New fragrance is at the store! Check out {fragrance.name}!"
+                )
             except Exception as e:
                 logger.error(f"Error sending notification to user {user_id}: {e}")
     except Exception as e:

@@ -39,7 +39,7 @@ async def main():
     dp.include_router(handlers.router)
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(update_fragrances, IntervalTrigger(minutes=30),
+    scheduler.add_job(update_fragrances, IntervalTrigger(minutes=1),
                       args=(create_dummy_message(bot), bot))  # Pass bot and message
     scheduler.start()
 

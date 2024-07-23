@@ -27,6 +27,7 @@ class Fragrance(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(100))
     is_sold_out: Mapped[bool] = mapped_column(Boolean, default=False)
+    image_url: Mapped[str] = mapped_column(String(200))
     parsed_datetime: Mapped[datetime] = mapped_column(DateTime, default=datetime.now(ZoneInfo('Asia/Almaty')))
     wishlists = relationship('Wishlist', secondary=wishlist_fragrance, back_populates='fragrances', lazy="selectin")
 

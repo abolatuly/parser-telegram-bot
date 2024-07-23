@@ -44,6 +44,7 @@ async def update_fragrances(message: Message, bot: Bot):
         async with async_session() as db_session:
             for product in products:
                 product_name = product.find('h1').text.strip() if product.find('h1') else None
+                product_image_link = product.find('img')['data-src']
 
                 if product_name:
                     product_name_upper = product_name.upper()
@@ -64,10 +65,10 @@ async def update_fragrances(message: Message, bot: Bot):
                                 # Notify users if the fragrance is no longer sold out
                                 from src.handlers.handlers import send_notification
                                 await send_notification(bot, fragrance)
-                                logger.info("Notifications have been sent")
                     else:
                         # Create a new fragrance
                         fragrance = Fragrance(name=product_name_upper, is_sold_out=bool(sold_out_marker),
+                                              image_url=product_image_link,
                                               parsed_datetime=datetime.now(ZoneInfo('Asia/Almaty')))
                         db_session.add(fragrance)
                         logger.info(f"Added new fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
@@ -76,7 +77,6 @@ async def update_fragrances(message: Message, bot: Bot):
                         # Notify users if the new fragrance has been added
                         from src.handlers.handlers import send_notification_new_fragrance
                         await send_notification_new_fragrance(bot, fragrance)
-                        logger.info("Notifications have been sent")
 
             await db_session.commit()
             logger.info("Database update completed.")
