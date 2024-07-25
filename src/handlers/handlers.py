@@ -43,7 +43,7 @@ async def show_wishlist(message: Message):
             for fragrance in wishlist.fragrances:
                 delete_from_wishlist = InlineKeyboardMarkup(
                     inline_keyboard=[[InlineKeyboardButton(text="Delete",
-                                                           callback_data=f"delete_{fragrance.name}")]])
+                                                           callback_data=f"_{fragrance.name[:60] if len(fragrance.name) > 60 else fragrance.name}")]])
                 await message.answer(text=f"{fragrance.name.title()}", reply_markup=delete_from_wishlist)
 
         await message.answer(text="If you want to add a new fragrance, press \"Add fragrance to wishlist\" below",
@@ -88,10 +88,10 @@ async def add_more(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(text="Type the name of a fragrance you want to add")
 
 
-@router.callback_query(F.data.startswith("delete_"))
+@router.callback_query(F.data.startswith("_"))
 async def delete(callback: CallbackQuery):
     try:
-        fragrance_name = callback.data.split("_")[1]
+        fragrance_name = await get_fragrance_by_name(callback.data.split("_")[1])
         telegram_id = callback.from_user.id
 
         result = await delete_fragrance_from_wishlist(telegram_id, fragrance_name)
