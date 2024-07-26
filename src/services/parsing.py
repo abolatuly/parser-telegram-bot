@@ -1,4 +1,6 @@
+import os
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -14,6 +16,10 @@ from config import config
 
 config.setup_logging()
 logger = logging.getLogger(__name__)
+logger_new_fragrance = logging.getLogger("new_fragrance")
+new_fragrance_handler = RotatingFileHandler(os.path.join('logs', 'new_fragrance.log'), maxBytes=1024 * 1024, backupCount=5)
+new_fragrance_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+logger_new_fragrance.addHandler(new_fragrance_handler)
 
 MONTAGNE_URL = "https://www.montagneparfums.com/fragrance"
 HEADERS = {
@@ -58,8 +64,9 @@ async def update_fragrances(message: Message, bot: Bot):
                         if fragrance.is_sold_out != bool(sold_out_marker):
                             fragrance.is_sold_out = bool(sold_out_marker)
                             fragrance.parsed_datetime = datetime.now(ZoneInfo('Asia/Almaty'))
-                            logger.info(f"Updated fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
-                                        f"parsed_datetime={fragrance.parsed_datetime}")
+                            logger_new_fragrance.info(
+                                f"Updated fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
+                                f"parsed_datetime={fragrance.parsed_datetime}")
 
                             if not bool(sold_out_marker):
                                 # Notify users if the fragrance is no longer sold out
@@ -71,8 +78,9 @@ async def update_fragrances(message: Message, bot: Bot):
                                               image_url=product_image_link,
                                               parsed_datetime=datetime.now(ZoneInfo('Asia/Almaty')))
                         db_session.add(fragrance)
-                        logger.info(f"Added new fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
-                                    f"parsed_datetime={fragrance.parsed_datetime}")
+                        logger_new_fragrance.info(
+                            f"Added new fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
+                            f"parsed_datetime={fragrance.parsed_datetime}")
 
                         # Notify users if the new fragrance has been added
                         from src.handlers.handlers import send_notification_new_fragrance
