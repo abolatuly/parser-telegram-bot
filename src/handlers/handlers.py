@@ -41,10 +41,14 @@ async def show_wishlist(message: Message):
             await message.answer("Your wishlist is empty.")
         else:
             for fragrance in wishlist.fragrances:
+                status_symbol = '✅' if not fragrance.is_sold_out else '❌'
                 delete_from_wishlist = InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="Delete",
-                                                           callback_data=f"_{fragrance.name[:60] if len(fragrance.name) > 60 else fragrance.name}")]])
-                await message.answer(text=f"{fragrance.name.title()}", reply_markup=delete_from_wishlist)
+                    inline_keyboard=[
+                        [InlineKeyboardButton(
+                            text="Delete",
+                            callback_data=f"_{fragrance.name[:60] if len(fragrance.name) > 60 else fragrance.name}")]])
+                await message.answer(text=f"{status_symbol} {fragrance.name.title()}",
+                                     reply_markup=delete_from_wishlist)
 
         await message.answer(text="If you want to add a new fragrance, press \"Add fragrance to wishlist\" below",
                              reply_markup=kb.add_to_wishlist)
@@ -111,7 +115,6 @@ async def all_fragrances(message: Message):
     try:
         fragrances = await requests.get_all_fragrances()
 
-        messages = []
         current_message = ""
         max_length = 4096
 
