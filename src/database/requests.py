@@ -1,41 +1,11 @@
 import logging
-from src.database.models import async_session, Fragrance, Wishlist
 from sqlalchemy import select, update
 from fuzzywuzzy import process
 from config import config
-
-from src.services.parsing import update_fragrances
+from src.database.models import async_session, Fragrance, Wishlist
 
 config.setup_logging()
 logger = logging.getLogger(__name__)
-
-
-async def add_fragrance_to_database():
-    async with async_session() as session:
-        wishlist = ['Imagination', 'Roja Elysium']
-
-        for fragrance_name in wishlist:
-            try:
-                existing_fragrance = await session.scalar(select(Fragrance).where(Fragrance.name == fragrance_name))
-
-                if not existing_fragrance:
-                    new_fragrance = Fragrance(name=fragrance_name)
-                    session.add(new_fragrance)
-                    logger.info(f"Added new fragrance: {fragrance_name}")
-                else:
-                    logger.info(f"Fragrance already exists: {fragrance_name}")
-
-            except Exception as e:
-                logger.error(f"Error adding fragrance {fragrance_name}: {e}")
-                await session.rollback()
-                continue
-
-        try:
-            await session.commit()
-            logger.info("Committed session")
-        except Exception as e:
-            logger.error(f"Error committing session: {e}")
-            await session.rollback()
 
 
 async def set_wishlist(tg_id):
@@ -167,10 +137,6 @@ async def toggle_notification_status_in_db(telegram_id):
             return None
 
 
-async def parse_website(message):
-    await update_fragrances(message)
-
-
 async def get_users_by_fragrance(fragrance):
     async with async_session() as session:
         try:
@@ -198,3 +164,14 @@ async def get_all_wishlists():
         except Exception as e:
             logger.error(f"Error retrieving users with notifications: {e}")
             return None
+
+
+async def get_all_users():
+    async with async_session() as session:
+        try:
+            result = await session.execute(select(Wishlist.telegram_id))
+            all_users = [row[0] for row in result.all()]
+            return all_users
+        except Exception as e:
+            logger.error(f"Error retrieving all users: {e}")
+            return []

@@ -1,15 +1,23 @@
+import asyncio
 import logging
+import time
+
+import redis.asyncio as redis
 from aiogram import Router, F, Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
+
 import src.keyboards.keyboards as kb
 from config import config
+from config.base import getenv
 from src.database import requests
-from src.database.requests import get_fragrance_by_name, add_fragrance_to_wishlist, get_wishlist_by_telegram_id, \
-    delete_fragrance_from_wishlist, get_notification_status_by_telegram_id, \
-    toggle_notification_status_in_db, get_users_by_fragrance, get_all_wishlists
-from src.states.states import Add_to_wishlist
+from src.database.requests import (
+    get_fragrance_by_name, add_fragrance_to_wishlist, get_wishlist_by_telegram_id,
+    delete_fragrance_from_wishlist, get_notification_status_by_telegram_id,
+    toggle_notification_status_in_db, get_users_by_fragrance, get_all_wishlists, get_all_users
+)
+from src.states.states import AddToWishlist, AdminMessage
 
 TELEGRAM_MESSAGE_LIMIT = 4096
 
@@ -17,27 +25,51 @@ config.setup_logging()
 logger = logging.getLogger(__name__)
 
 router: Router = Router()
+redis_client = redis.Redis(host='localhost', port=6380, db=0)
+
+COOLDOWN_PERIOD = 3  # Cooldown period in seconds
+
+
+def cooldown_key(user_id, action):
+    return f"cooldown_{action}_{user_id}"
+
+
+async def check_cooldown(user_id, action):
+    last_interaction_time = await redis_client.get(cooldown_key(user_id, action))
+    current_time = time.time()
+    if last_interaction_time is not None and (current_time - float(last_interaction_time)) < COOLDOWN_PERIOD:
+        return True
+    await redis_client.set(cooldown_key(user_id, action), current_time)
+    return False
 
 
 @router.message(CommandStart())
 async def process_any_message(message: Message):
+    is_admin = str(message.from_user.id) == getenv("ADMIN_USER_ID")
     await requests.set_wishlist(tg_id=message.from_user.id)
-    await message.answer(text="Welcome to Montagne Parfums fragrance tracker!", reply_markup=kb.main)
+    await message.answer(text="Welcome to Montagne Parfums fragrance tracker!",
+                         reply_markup=kb.get_main_keyboard(is_admin))
 
 
 @router.message(F.text == "◀️ Back to menu")
-async def menu(msg: Message, state: FSMContext):
+async def menu(message: Message, state: FSMContext):
     await state.clear()
-    await msg.answer(text="Main menu", reply_markup=kb.main)
+    is_admin = str(message.from_user.id) == getenv("ADMIN_USER_ID")
+    await message.answer(text="Main menu", reply_markup=kb.get_main_keyboard(is_admin))
 
 
 @router.message(F.text == "📄 Wishlist")
 async def show_wishlist(message: Message):
+    user_id = message.from_user.id
+    if await check_cooldown(user_id, "wishlist"):
+        await message.answer("Please wait before requesting the wishlist again.")
+        return
+
     try:
         telegram_id = message.from_user.id
         wishlist = await get_wishlist_by_telegram_id(telegram_id)
 
-        if wishlist is None or not wishlist.fragrances:
+        if not wishlist or not wishlist.fragrances:
             await message.answer("Your wishlist is empty.")
         else:
             for fragrance in wishlist.fragrances:
@@ -60,11 +92,16 @@ async def show_wishlist(message: Message):
 
 @router.message(F.text == "➕ Add fragrance to wishlist")
 async def type_fragrance(message: Message, state: FSMContext):
-    await state.set_state(Add_to_wishlist.adding)
+    user_id = message.from_user.id
+    if await check_cooldown(user_id, "add_wishlist"):
+        await message.answer("Please wait before requesting again.")
+        return
+
+    await state.set_state(AddToWishlist.adding)
     await message.answer(text="Type the name of a fragrance you want to add")
 
 
-@router.message(Add_to_wishlist.adding)
+@router.message(AddToWishlist.adding)
 async def add_to_wishlist(message: Message, state: FSMContext):
     try:
         telegram_id = message.from_user.id
@@ -88,7 +125,7 @@ async def add_to_wishlist(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "add_more")
 async def add_more(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(Add_to_wishlist.adding)
+    await state.set_state(AddToWishlist.adding)
     await callback.message.answer(text="Type the name of a fragrance you want to add")
 
 
@@ -112,6 +149,11 @@ async def delete(callback: CallbackQuery):
 
 @router.message(F.text == "🔍 Fragrances")
 async def all_fragrances(message: Message):
+    user_id = message.from_user.id
+    if await check_cooldown(user_id, "fragrances"):
+        await message.answer("Please wait before requesting the list of fragrances again.")
+        return
+
     try:
         fragrances = await requests.get_all_fragrances()
 
@@ -140,6 +182,11 @@ async def all_fragrances(message: Message):
 
 @router.message(F.text == "⚙️ Settings")
 async def settings(message: Message):
+    user_id = message.from_user.id
+    if await check_cooldown(user_id, "settings"):
+        await message.answer("Please wait before requesting the settings again.")
+        return
+
     try:
         telegram_id = message.from_user.id
         notification_status = await get_notification_status_by_telegram_id(telegram_id)
@@ -181,15 +228,37 @@ async def send_notification(bot: Bot, fragrance):
     try:
         users = await get_users_by_fragrance(fragrance)
 
-        for user_id in users:
-            try:
-                await bot.send_photo(
+        async def send_batch(batch, retries=3):
+            for attempt in range(retries):
+                tasks = [bot.send_photo(
                     chat_id=user_id,
-                    photo=fragrance.image_url,  # Use the image URL from the fragrance object
+                    photo=fragrance.image_url,
                     caption=f"The fragrance {fragrance.name} is now available!"
-                )
-            except Exception as e:
-                logger.error(f"Error sending notification to user {user_id}: {e}")
+                ) for user_id in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                failed_users = []
+                for user_id, result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Attempt {attempt + 1} failed for user {user_id}: {result}")
+                        failed_users.append(user_id)
+                    else:
+                        logger.info(f"Notification sent to user {user_id} on attempt {attempt + 1}")
+
+                if not failed_users:
+                    break
+
+                batch = failed_users
+            else:
+                for user_id in batch:
+                    logger.error(f"Failed to send notification to user {user_id} after {retries} attempts")
+
+        batch_size = 50
+        for i in range(0, len(users), batch_size):
+            batch = users[i:i + batch_size]
+            await send_batch(batch)
+            await asyncio.sleep(1)
+
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
 
@@ -198,14 +267,120 @@ async def send_notification_new_fragrance(bot: Bot, fragrance):
     try:
         users = await get_all_wishlists()
 
-        for user_id in users:
-            try:
-                await bot.send_photo(
+        async def send_batch(batch, retries=3):
+            for attempt in range(retries):
+                tasks = [bot.send_photo(
                     chat_id=user_id,
-                    photo=fragrance.image_url,  # Use the image URL from the fragrance object
+                    photo=fragrance.image_url,
                     caption=f"New fragrance is at the store! Check out {fragrance.name}!"
-                )
-            except Exception as e:
-                logger.error(f"Error sending notification to user {user_id}: {e}")
+                ) for user_id in batch]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                failed_users = []
+                for user_id, result in zip(batch, results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Attempt {attempt + 1} failed for user {user_id}: {result}")
+                        failed_users.append(user_id)
+
+                if not failed_users:
+                    break
+
+                batch = failed_users
+            else:
+                for user_id in batch:
+                    logger.error(f"Failed to send notification to user {user_id} after {retries} attempts")
+
+        batch_size = 50
+        for i in range(0, len(users), batch_size):
+            batch = users[i:i + batch_size]
+            await send_batch(batch)
+            await asyncio.sleep(1)
+
     except Exception as e:
         logger.error(f"Error sending notification: {e}")
+
+
+async def send_message_to_all_users(bot, message_text):
+    users = await get_all_users()  # Implement this function to get all user IDs
+
+    async def send_batch(batch, retries=3):
+        for attempt in range(retries):
+            tasks = [bot.send_message(chat_id=user_id, text=message_text) for user_id in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            failed_users = []
+            for user_id, result in zip(batch, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Attempt {attempt + 1} failed for user {user_id}: {result}")
+                    failed_users.append(user_id)
+
+            if not failed_users:
+                break
+
+            batch = failed_users
+        else:
+            for user_id in batch:
+                logger.error(f"Failed to send message to user {user_id} after {retries} attempts")
+
+    batch_size = 50
+    for i in range(0, len(users), batch_size):
+        batch = users[i:i + batch_size]
+        await send_batch(batch)
+        await asyncio.sleep(1)  # Add a delay between batches to avoid rate limiting
+
+
+async def send_photo_to_all_users(bot, photo_file_id, caption=None):
+    users = await get_all_users()  # Implement this function to get all user IDs
+
+    async def send_batch(batch, retries=3):
+        for attempt in range(retries):
+            tasks = [bot.send_photo(chat_id=user_id, photo=photo_file_id, caption=caption) for user_id in batch]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            failed_users = []
+            for user_id, result in zip(batch, results):
+                if isinstance(result, Exception):
+                    logger.error(f"Attempt {attempt + 1} failed for user {user_id}: {result}")
+                    failed_users.append(user_id)
+
+            if not failed_users:
+                break
+
+            batch = failed_users
+        else:
+            for user_id in batch:
+                logger.error(f"Failed to send photo to user {user_id} after {retries} attempts")
+
+    batch_size = 50
+    for i in range(0, len(users), batch_size):
+        batch = users[i:i + batch_size]
+        await send_batch(batch)
+        await asyncio.sleep(1)  # Add a delay between batches to avoid rate limiting
+
+
+@router.message(F.text == "👨🏻‍💼 Admin")
+async def admin_button_pressed(message: Message, state: FSMContext):
+    if str(message.from_user.id) == getenv("ADMIN_USER_ID"):
+        await message.answer("Please enter the message you want to send to all users.", reply_markup=kb.back_to_menu)
+        await state.set_state(AdminMessage.typing_message)
+    else:
+        await message.answer("You do not have permission to use this feature.")
+
+
+@router.message(AdminMessage.typing_message)
+async def send_admin_message(message: Message, state: FSMContext):
+    await state.clear()
+
+    if message.text or message.caption:
+        text = message.text or message.caption
+        if message.photo:
+            photo = message.photo[-1]  # Get the largest photo
+            photo_file_id = photo.file_id
+            await send_photo_to_all_users(message.bot, photo_file_id, text)
+        else:
+            await send_message_to_all_users(message.bot, text)
+    else:
+        await message.answer("Only text and photo messages are supported.")
+        return
+
+    await message.answer("Your message has been sent to all users.")
