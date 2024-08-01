@@ -25,7 +25,7 @@ config.setup_logging()
 logger = logging.getLogger(__name__)
 
 router: Router = Router()
-redis_client = redis.Redis(host='localhost', port=6380, db=0)
+redis_client = redis.Redis(host='localhost', port=6381, db=0)
 
 COOLDOWN_PERIOD = 3  # Cooldown period in seconds
 
