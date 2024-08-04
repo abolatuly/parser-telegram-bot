@@ -183,20 +183,38 @@ async def all_fragrances(message: Message):
 @router.message(F.text == "⚙️ Settings")
 async def settings(message: Message):
     user_id = message.from_user.id
+    is_admin = str(user_id) == getenv("ADMIN_USER_ID")
+
     if await check_cooldown(user_id, "settings"):
         await message.answer("Please wait before requesting the settings again.")
         return
 
     try:
-        telegram_id = message.from_user.id
-        notification_status = await get_notification_status_by_telegram_id(telegram_id)
+        notification_status = await get_notification_status_by_telegram_id(user_id)
+        admin_prioritize_status = await redis_client.get("is_admin_prioritize")
+        admin_prioritize_status = admin_prioritize_status.decode()
+
+        # Default to 'False' if the value is not set
+        if admin_prioritize_status not in ["True", "False"]:
+            admin_prioritize_status = "False"
 
         if notification_status is not None:
             status_text = "On" if notification_status else "Off"
-            status = InlineKeyboardMarkup(
+            notification_keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[[InlineKeyboardButton(text=f"Receive Notification: {status_text}",
-                                                       callback_data="toggle_notification_status")]])
-            await message.answer(text="Your notification status:", reply_markup=status)
+                                                       callback_data="toggle_notification_status")]]
+            )
+
+            if is_admin:
+                admin_prioritize_text = "On" if admin_prioritize_status == "True" else "Off"
+                admin_prioritize_keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text=f"Admin Prioritize: {admin_prioritize_text}",
+                                                           callback_data="toggle_admin_prioritize")]]
+                )
+                await message.answer(text="Your notification status:", reply_markup=notification_keyboard)
+                await message.answer(text="Admin prioritize status:", reply_markup=admin_prioritize_keyboard)
+            else:
+                await message.answer(text="Your notification status:", reply_markup=notification_keyboard)
         else:
             await message.answer("Could not retrieve your notification status. Please try again later.")
     except Exception as e:
@@ -224,9 +242,50 @@ async def toggle_notification_status(callback_query: CallbackQuery):
                                             "Please try again later.")
 
 
-async def send_notification(bot: Bot, fragrance):
+@router.callback_query(F.data == "toggle_admin_prioritize")
+async def toggle_admin_prioritize(callback_query: CallbackQuery):
+    user_id = callback_query.from_user.id
+    is_admin = str(user_id) == getenv("ADMIN_USER_ID")
+    if not is_admin:
+        await callback_query.answer("You are not authorized to use this feature.")
+        return
+
+    current_status = await redis_client.get("is_admin_prioritize")
+    if current_status is None:
+        current_status = "False"  # Default to False if not set
+    else:
+        current_status = current_status.decode()
+    new_status = "False" if current_status == "True" else "True"
+    await redis_client.set("is_admin_prioritize", new_status)
+    logger.info(f"Admin Prioritize status changed from {current_status} to {new_status}")
+
+    status_text = "On" if new_status == "True" else "Off"
+    await callback_query.message.edit_reply_markup(
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text=f"Admin Prioritize: {status_text}",
+                                                   callback_data="toggle_admin_prioritize")]]
+        )
+    )
+    await callback_query.answer("Admin prioritize status updated.")
+
+
+async def send_notification(bot: Bot, fragrance, priority_queue=False, second_try=False):
     try:
         users = await get_users_by_fragrance(fragrance)
+        if priority_queue:
+            # Notify the admin user immediately
+            admin_user_id = getenv("ADMIN_USER_ID")
+            await bot.send_photo(
+                chat_id=admin_user_id,
+                photo=fragrance.image_url,
+                caption=f"The fragrance {fragrance.name} is now available!"
+            )
+            return
+
+        if second_try:
+            admin_user_id = int(getenv("ADMIN_USER_ID"))
+            if admin_user_id in users:
+                users.remove(int(admin_user_id))  # Remove admin from the list for later notifications
 
         async def send_batch(batch, retries=3):
             for attempt in range(retries):
@@ -242,8 +301,6 @@ async def send_notification(bot: Bot, fragrance):
                     if isinstance(result, Exception):
                         logger.error(f"Attempt {attempt + 1} failed for user {user_id}: {result}")
                         failed_users.append(user_id)
-                    else:
-                        logger.info(f"Notification sent to user {user_id} on attempt {attempt + 1}")
 
                 if not failed_users:
                     break

@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from src.database.models import Fragrance, engine
 from config import config
+from src.handlers.handlers import redis_client
 
 config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -34,11 +36,10 @@ async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False
 
 
 async def update_fragrances(message: Message, bot: Bot):
-    """Check the availability of products and update the database."""
     async with aiohttp.ClientSession() as session:
         try:
             async with session.get(MONTAGNE_URL, headers=HEADERS) as response:
-                response.raise_for_status()  # Raise an error for bad responses
+                response.raise_for_status()
                 html = await response.text()
         except aiohttp.ClientError as e:
             logger.error(f"Error fetching the product page: {e}")
@@ -56,11 +57,9 @@ async def update_fragrances(message: Message, bot: Bot):
                     product_name_upper = product_name.upper()
                     sold_out_marker = product.find('div', class_='product-mark sold-out')
 
-                    # Check if the fragrance already exists in the database
                     fragrance = await db_session.scalar(select(Fragrance).where(Fragrance.name == product_name_upper))
 
                     if fragrance:
-                        # Update the existing fragrance
                         if fragrance.is_sold_out != bool(sold_out_marker):
                             fragrance.is_sold_out = bool(sold_out_marker)
                             fragrance.parsed_datetime = datetime.now(ZoneInfo('Asia/Almaty'))
@@ -68,12 +67,19 @@ async def update_fragrances(message: Message, bot: Bot):
                                 f"Updated fragrance {product_name_upper}: is_sold_out={bool(sold_out_marker)}, "
                                 f"parsed_datetime={fragrance.parsed_datetime}")
 
-                            if not bool(sold_out_marker):
-                                # Notify users if the fragrance is no longer sold out
-                                from src.handlers.handlers import send_notification
+                            # Retrieve the admin prioritize status
+                            is_admin_prioritize = await redis_client.get("is_admin_prioritize")
+                            from src.handlers.handlers import send_notification
+                            if is_admin_prioritize.decode() == "True":
+                                # Notify admin immediately
+                                await send_notification(bot, fragrance, priority_queue=True)
+                                # Notify other users 5 minutes later
+                                await asyncio.sleep(300)  # 5 minutes
+                                await send_notification(bot, fragrance, second_try=True)
+                            else:
                                 await send_notification(bot, fragrance)
+
                     else:
-                        # Create a new fragrance
                         fragrance = Fragrance(name=product_name_upper, is_sold_out=bool(sold_out_marker),
                                               image_url=product_image_link,
                                               parsed_datetime=datetime.now(ZoneInfo('Asia/Almaty')))
