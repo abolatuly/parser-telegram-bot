@@ -155,7 +155,7 @@ async def all_fragrances(message: Message):
 async def settings(message: Message):
     user_id = message.from_user.id
 
-    if user_id == getenv("ADMIN_ID"):
+    if str(user_id) == getenv("ADMIN_ID"):
         try:
             notification_status = await get_notification_status_by_telegram_id(user_id)
 
