@@ -1,13 +1,11 @@
 from aiogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, KeyboardButton
 
 
-def get_main_keyboard(is_admin):
+def get_main_keyboard():
     keyboard = [
         [KeyboardButton(text="📄 Wishlist"), KeyboardButton(text="🔍 Fragrances")],
         [KeyboardButton(text="⚙️ Settings")]
     ]
-    if is_admin:
-        keyboard.append([KeyboardButton(text="👨🏻‍💼 Admin")])
     return ReplyKeyboardMarkup(
         keyboard=keyboard,
         input_field_placeholder="Choose from the menu",

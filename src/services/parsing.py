@@ -1,4 +1,3 @@
-import asyncio
 import os
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -14,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from src.database.models import Fragrance, engine
 from config import config
-from src.handlers.handlers import redis_client
 
 config.setup_logging()
 logger = logging.getLogger(__name__)
@@ -68,16 +66,8 @@ async def update_fragrances(message: Message, bot: Bot):
                                 f"parsed_datetime={fragrance.parsed_datetime}")
 
                             # Retrieve the admin prioritize status
-                            is_admin_prioritize = await redis_client.get("is_admin_prioritize")
                             from src.handlers.handlers import send_notification
-                            if is_admin_prioritize.decode() == "True":
-                                # Notify admin immediately
-                                await send_notification(bot, fragrance, priority_queue=True)
-                                # Notify other users 5 minutes later
-                                await asyncio.sleep(300)  # 5 minutes
-                                await send_notification(bot, fragrance, second_try=True)
-                            else:
-                                await send_notification(bot, fragrance)
+                            await send_notification(bot, fragrance)
 
                     else:
                         fragrance = Fragrance(name=product_name_upper, is_sold_out=bool(sold_out_marker),
