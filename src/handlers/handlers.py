@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from os import getenv
 
 from aiogram import Router, F, Bot
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -24,77 +25,77 @@ logger = logging.getLogger(__name__)
 router: Router = Router()
 
 
-def cooldown_key(user_id, action):
-    return f"cooldown_{action}_{user_id}"
-
-
 @router.message(CommandStart())
 async def process_any_message(message: Message):
-    await requests.set_wishlist(tg_id=message.from_user.id)
-    await message.answer(text="Welcome to Montagne Parfums fragrance tracker!",
-                         reply_markup=kb.get_main_keyboard())
+    if str(message.from_user.id) == getenv("ADMIN_ID"):
+        await requests.set_wishlist(tg_id=message.from_user.id)
+        await message.answer(text="Welcome to Montagne Parfums fragrance tracker!",
+                             reply_markup=kb.get_main_keyboard())
 
 
 @router.message(F.text == "◀️ Back to menu")
 async def menu(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(text="Main menu", reply_markup=kb.get_main_keyboard())
+    if str(message.from_user.id) == getenv("ADMIN_ID"):
+        await state.clear()
+        await message.answer(text="Main menu", reply_markup=kb.get_main_keyboard())
 
 
 @router.message(F.text == "📄 Wishlist")
 async def show_wishlist(message: Message):
+    if str(message.from_user.id) == getenv("ADMIN_ID"):
+        try:
+            telegram_id = message.from_user.id
+            wishlist = await get_wishlist_by_telegram_id(telegram_id)
 
-    try:
-        telegram_id = message.from_user.id
-        wishlist = await get_wishlist_by_telegram_id(telegram_id)
+            if not wishlist or not wishlist.fragrances:
+                await message.answer("Your wishlist is empty.")
+            else:
+                for fragrance in wishlist.fragrances:
+                    status_symbol = '✅' if not fragrance.is_sold_out else '❌'
+                    delete_from_wishlist = InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(
+                                text="Delete",
+                                callback_data=f"_{fragrance.name[:60] if len(fragrance.name) > 60 else fragrance.name}")]])
+                    await message.answer(text=f"{status_symbol} {fragrance.name.title()}",
+                                         reply_markup=delete_from_wishlist)
 
-        if not wishlist or not wishlist.fragrances:
-            await message.answer("Your wishlist is empty.")
-        else:
-            for fragrance in wishlist.fragrances:
-                status_symbol = '✅' if not fragrance.is_sold_out else '❌'
-                delete_from_wishlist = InlineKeyboardMarkup(
-                    inline_keyboard=[
-                        [InlineKeyboardButton(
-                            text="Delete",
-                            callback_data=f"_{fragrance.name[:60] if len(fragrance.name) > 60 else fragrance.name}")]])
-                await message.answer(text=f"{status_symbol} {fragrance.name.title()}",
-                                     reply_markup=delete_from_wishlist)
+            await message.answer(text="If you want to add a new fragrance, press \"Add fragrance to wishlist\" below",
+                                 reply_markup=kb.add_to_wishlist)
 
-        await message.answer(text="If you want to add a new fragrance, press \"Add fragrance to wishlist\" below",
-                             reply_markup=kb.add_to_wishlist)
-
-    except Exception as e:
-        logger.error(f"Error showing wishlist: {e}")
-        await message.answer("An error occurred while showing your wishlist. Please try again later.")
+        except Exception as e:
+            logger.error(f"Error showing wishlist: {e}")
+            await message.answer("An error occurred while showing your wishlist. Please try again later.")
 
 
 @router.message(F.text == "➕ Add fragrance to wishlist")
 async def type_fragrance(message: Message, state: FSMContext):
-    await state.set_state(AddToWishlist.adding)
-    await message.answer(text="Type the name of a fragrance you want to add")
+    if str(message.from_user.id) == getenv("ADMIN_ID"):
+        await state.set_state(AddToWishlist.adding)
+        await message.answer(text="Type the name of a fragrance you want to add")
 
 
 @router.message(AddToWishlist.adding)
 async def add_to_wishlist(message: Message, state: FSMContext):
-    try:
-        telegram_id = message.from_user.id
-        fragrance_name = await get_fragrance_by_name(message.text)
+    if str(message.from_user.id) == getenv("ADMIN_ID"):
+        try:
+            telegram_id = message.from_user.id
+            fragrance_name = await get_fragrance_by_name(message.text)
 
-        if fragrance_name:
-            result = await add_fragrance_to_wishlist(telegram_id, fragrance_name)
+            if fragrance_name:
+                result = await add_fragrance_to_wishlist(telegram_id, fragrance_name)
 
-            if result:
-                await message.answer(f"{fragrance_name.title()} was added to your wishlist!", reply_markup=kb.add_more)
+                if result:
+                    await message.answer(f"{fragrance_name.title()} was added to your wishlist!", reply_markup=kb.add_more)
+                else:
+                    await message.answer(f"{fragrance_name.title()} is already in your wishlist!", reply_markup=kb.add_more)
+                await state.clear()
             else:
-                await message.answer(f"{fragrance_name.title()} is already in your wishlist!", reply_markup=kb.add_more)
-            await state.clear()
-        else:
-            await message.answer("Sorry, we couldn't find a matching fragrance. "
-                                 "Please try again with a different name.")
-    except Exception as e:
-        logger.error(f"Error in add_to_wishlist handler: {e}")
-        await message.answer("An error occurred while processing your request. Please try again later.")
+                await message.answer("Sorry, we couldn't find a matching fragrance. "
+                                     "Please try again with a different name.")
+        except Exception as e:
+            logger.error(f"Error in add_to_wishlist handler: {e}")
+            await message.answer("An error occurred while processing your request. Please try again later.")
 
 
 @router.callback_query(F.data == "add_more")
@@ -123,53 +124,54 @@ async def delete(callback: CallbackQuery):
 
 @router.message(F.text == "🔍 Fragrances")
 async def all_fragrances(message: Message):
+    if str(message.from_user.id) == getenv("ADMIN_ID"):
+        try:
+            fragrances = await requests.get_all_fragrances()
 
-    try:
-        fragrances = await requests.get_all_fragrances()
+            current_message = ""
+            max_length = 4096
 
-        current_message = ""
-        max_length = 4096
+            for name, is_sold_out in fragrances:
+                status_symbol = '✅' if not is_sold_out else '❌'
+                fragrance_entry = f"{status_symbol} {name.title()}\n"
 
-        for name, is_sold_out in fragrances:
-            status_symbol = '✅' if not is_sold_out else '❌'
-            fragrance_entry = f"{status_symbol} {name.title()}\n"
+                if len(current_message) + len(fragrance_entry) > max_length:
+                    if current_message:
+                        await message.answer(current_message.strip())
+                        current_message = ""
 
-            if len(current_message) + len(fragrance_entry) > max_length:
-                if current_message:
-                    await message.answer(current_message.strip())
-                    current_message = ""
+                current_message += fragrance_entry
 
-            current_message += fragrance_entry
-
-        if current_message:
-            await message.answer(current_message.strip())
-        else:
-            await message.answer("List of fragrances is empty.")
-    except Exception as e:
-        logger.error(f"Error showing all fragrances: {e}")
-        await message.answer("An error occurred while showing all fragrances. Please try again later.")
+            if current_message:
+                await message.answer(current_message.strip())
+            else:
+                await message.answer("List of fragrances is empty.")
+        except Exception as e:
+            logger.error(f"Error showing all fragrances: {e}")
+            await message.answer("An error occurred while showing all fragrances. Please try again later.")
 
 
 @router.message(F.text == "⚙️ Settings")
 async def settings(message: Message):
     user_id = message.from_user.id
 
-    try:
-        notification_status = await get_notification_status_by_telegram_id(user_id)
+    if user_id == getenv("ADMIN_ID"):
+        try:
+            notification_status = await get_notification_status_by_telegram_id(user_id)
 
-        if notification_status is not None:
-            status_text = "On" if notification_status else "Off"
-            notification_keyboard = InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text=f"Receive Notification: {status_text}",
-                                                       callback_data="toggle_notification_status")]]
-            )
-            await message.answer(text="Your notification status:", reply_markup=notification_keyboard)
+            if notification_status is not None:
+                status_text = "On" if notification_status else "Off"
+                notification_keyboard = InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text=f"Receive Notification: {status_text}",
+                                                           callback_data="toggle_notification_status")]]
+                )
+                await message.answer(text="Your notification status:", reply_markup=notification_keyboard)
 
-        else:
-            await message.answer("Could not retrieve your notification status. Please try again later.")
-    except Exception as e:
-        logger.error(f"Error showing settings: {e}")
-        await message.answer("An error occurred while showing your settings. Please try again later.")
+            else:
+                await message.answer("Could not retrieve your notification status. Please try again later.")
+        except Exception as e:
+            logger.error(f"Error showing settings: {e}")
+            await message.answer("An error occurred while showing your settings. Please try again later.")
 
 
 @router.callback_query(F.data == "toggle_notification_status")
