@@ -2,10 +2,12 @@ import asyncio
 import logging
 from datetime import datetime
 
+import uvicorn
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Message, Chat
+from fastapi import FastAPI
 
 from config import Config, load_config
 from config import config
@@ -19,6 +21,7 @@ from src.services.parsing import update_fragrances
 
 config.setup_logging()
 logger = logging.getLogger(__name__)
+app = FastAPI()
 
 
 def create_dummy_message(bot: Bot):
@@ -49,6 +52,8 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(asyncio.gather(main(),
+                                               asyncio.to_thread(lambda: uvicorn.run(app, host="0.0.0.0", port=8000))))
     except (KeyboardInterrupt, SystemExit):
         logger.info("Bot stopped")
